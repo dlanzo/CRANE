@@ -1,0 +1,12 @@
+__*
+data/*
+out/*
+models/*
+test_outputs/*
+train_logs/*
+
+!data/.keep
+!out/.keep
+!models/.keep
+!train_logs/.keep
+!__init__.py
