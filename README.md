@@ -1,4 +1,3 @@
-## CRANE
 # Convolutional Recurrent Approximation of Nanoscale Evolution
 This is a project to approximate PDE evolution of microstructures through Convolutional Recurrent Neural Networks based on the PyTorch framework
 
