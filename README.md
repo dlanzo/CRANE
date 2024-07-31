@@ -9,6 +9,7 @@ The code is written in Python. Dependencies needed are (should be an exhaustive 
 - `numpy` (mathematical function and algebra module)
 - `torch` (NN definition, training and deployment; GPU utilization; "2.0.0+cu117" with compile, "1.9.0+cu102", "1.10.1+cu113" and "1.13.0+cu117" tested, but versions down to 1.7 should run)
 - `torchvision` (computer vision part of torch; "0.10.0+cu102" and "0.11.2+cu113" versions tested)
+- `pyvista` (saving vtk format)
 - `numba` (optional; jit compilation of python code: needed to speed up some operations related to initial conditions. Code should work as intended, if slower, without it)
 
 Installation through pip3 (or in a virtualenv) should be enough.
