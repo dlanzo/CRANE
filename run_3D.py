@@ -36,27 +36,7 @@ class PersistentConvGRU3D(ConvGRU3D):
         '''
         super(PersistentConvGRU3D, self).__init__(*args, **kwargs)
         self.hidden_list = None
-        
-        
-    #def divergence(self, x):
-        #'''
-        #This method calculates the divergence of the given field using finite differences approximation
-        #'''
-        
-        #Jx, Jy, Jz = torch.split(x, 1, dim=1)
-        
-        #Jx = Jx - torch.mean(Jx, dim=(-1,-2,-3), keepdim=True)
-        #Jy = Jy - torch.mean(Jy, dim=(-1,-2,-3), keepdim=True)
-        #Jz = Jz - torch.mean(Jz, dim=(-1,-2,-3), keepdim=True)
-        
-        #gradx = self.divergence_filters[0](Jx)
-        #grady = self.divergence_filters[1](Jy)
-        #gradz = self.divergence_filters[2](Jz)
-        
-        #divergence = gradx+grady+gradz
-        
-        #return divergence
-        
+
     
     def set_hidden(self, in_sequence):
         
@@ -219,9 +199,6 @@ def main():
         
         print_model_info(model)
         
-        #model = torch.compile(model)
-        #reloaded_model = torch.compile(reloaded_model)
-        
         # Reload operation
         args.reload_model = args.model_name
         reloaded_model = import_model(reloaded_model, args)
@@ -237,9 +214,7 @@ def main():
             
             
         model.to(args.device)
-        
-        
-        
+
         
         # resize initial state
         resizer = lambda x : torch.nn.functional.interpolate(x, size=(args.size, args.size, args.size))
