@@ -88,8 +88,9 @@ def train(model, loss_fn, optimizer, loaders, args):
             elif j%args.logfreq == 0:
                 print(f'Passing example[{j}/{len_train_loader-1}] in epoch {epoch}')
             
+            input_data  = clip_series(series, in_seq_length).to(args.device)
+            
             if not args.extract_param:
-                input_data  = clip_series(series, in_seq_length).to(args.device)
                 target_data = series[:,1:,:,:,:].to(args.device)
             
                 if args.dual:
@@ -100,8 +101,6 @@ def train(model, loss_fn, optimizer, loaders, args):
                             params[pp] = torch.cat([params[pp], params[pp]])
                         
             else:
-                input_data  = series.to(args.device)
-                
                 if args.dual:
                     input_data  = withdual(input_data)
                     if params is not None:
@@ -158,7 +157,7 @@ def train(model, loss_fn, optimizer, loaders, args):
                     print('Breaking because of DEBUG mode.')
                     break
                 
-                in_seq_length   = args.subseq_min
+                in_seq_length   = args.subseq_min # this should make validation always as hard as possible
                 future          = series.shape[1]-in_seq_length-1
                     
                 
