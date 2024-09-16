@@ -38,8 +38,8 @@ class GeneralParser():
         self.parser.add_argument(
             '--size',
             type        = int,
-            default     = 90,
-            help        = 'Dimension at which images are to be rescaled (measured in pixels); currently working only for square images.'
+            default     = -1,
+            help        = 'Dimension at which images are to be rescaled (measured in pixels); currently working only for square images. Set to -1 to remove resizing.'
             )
         
         self.parser.add_argument(

@@ -299,8 +299,11 @@ class TabulatedSeries3D(torch.utils.data.Dataset):
         self.bootstrap_loader = bootstrap_loader
         
         self.size           = size
-        
-        self.resizer = lambda x: torch.nn.functional.interpolate(x, size=(self.size, self.size, self.size))
+
+        if self.size == -1:
+            self.resizer = lambda x: x
+        else:
+            self.resizer = lambda x: torch.nn.functional.interpolate(x, size=(self.size, self.size, self.size))
         
         with open(self.table_path,'r') as table_file:
             self.table  = table_file.readlines()
@@ -408,11 +411,17 @@ def give_dataloaders(args):
         
     if not has_sets:
         raise RuntimeError('No dataset was detected in args. Check arguments are parsed correctly.')
-    
+
+    if args.size == -1:
+        resizer = nn.Identity()
+    else:
+        resizer = transforms.Resize( args.size )
+
+
     transform = transforms.Compose(
             [
                 transforms.Grayscale( num_output_channels=1 ),
-                transforms.Resize( args.size ),
+                resizer,
                 transforms.ToTensor()
             ]
         )
