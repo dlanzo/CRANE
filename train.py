@@ -133,7 +133,7 @@ def train(model, loss_fn, optimizer, loaders, args):
                 
         train_losses.append( np.mean(epoch_train_losses) )
         with open( f'{args.paths["trainloss"]}', 'a+') as train_loss_file:
-            train_loss_file.write(f'{epoch_train_losses[-1]} ')
+            train_loss_file.write(f'{epoch_train_losses[-1]}\n')
         # --- training loop ---
         
         # <<< validation loop <<<
@@ -201,7 +201,7 @@ def train(model, loss_fn, optimizer, loaders, args):
             valid_losses.append( np.mean(epoch_valid_losses) )
             
             with open( f'{args.paths["validloss"]}', 'a+') as valid_loss_file:
-                valid_loss_file.write(f'{epoch_valid_losses[-1]} ')
+                valid_loss_file.write(f'{epoch_valid_losses[-1]}\n')
             
         optimizer.zero_grad() # <- better safe than sorry
         # --- validation loop ---
