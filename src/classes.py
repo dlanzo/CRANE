@@ -999,7 +999,7 @@ class ConvGRUClassifier(ConvGRU):
                 in_channels     = 4*self.hidden_channels,
                 out_channels    = self.output_channels,
                 kernel_size     = 2,
-                stride          = 1,
+                stride          = 2,
                 padding         = 0,
                 padding_mode    = self.padding_mode,
                 bias            = self.bias
