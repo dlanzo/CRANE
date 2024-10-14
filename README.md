@@ -44,3 +44,6 @@ The scope of folders is as follows:
 - _`out`_ contains the output of "CRANE simulations", e.g. the outputs of the _`run_3D.py`_ script.
 - _`tools`_ is a folder intended to contain utility scripts (at the moment, examples of runfiles)
 - _`train_logs`_ contains the output of training procedures (i.e. training statistics, model checkpoints, prediction snapshots at different training stages...)
+
+# Papers
+The CRANE code has been used for the paper: [_Extreme time extrapolation capabilities and thermodynamic consistency of physics-inspired NeuralNetworks for the 3D microstructure evolution of materials via Cahn-Hilliard flow_](https://doi.org/10.1088/2632-2153/ad8532). If you need the dataset for reproducing this study don't hesitate to contact us.
