@@ -12,6 +12,8 @@ import PIL
 from PIL import Image
 
 import time
+
+from typing import Callable, Union
 # --- import external stuff ---
 
 # <<< import my stuff <<<
@@ -30,7 +32,20 @@ class TabulatedSeries(torch.utils.data.Dataset):
     - rotation_90       ->  toggles 90° rotations of the input
     '''
     
-    def __init__(self, table_path, params_num=0, transform=None, rotation=True, reflections = (False, False), translation=True, rotation_90=False, rotation_order=0, cropkey=True, crop_lim=(0.25,0.75), bootstrap_loader=False, twin_image=False):
+    def __init__(self,
+        table_path      : str,
+        params_num      : int           = 0,
+        transform       : Union[ Callable[[torch.Tensor], torch.Tensor], None ]  = None,
+        rotation        : bool          = True,
+        reflections     : tuple[float]  = (False, False),
+        translation     : bool          = True,
+        rotation_90     : bool          = False,
+        rotation_order  : int           = 0,
+        cropkey         : bool          = True,
+        crop_lim        : tuple[float]  = (0.25,0.75),
+        bootstrap_loader: bool          = False,
+        twin_image      : bool          = False
+        ) -> None:
         
         super(TabulatedSeries, self).__init__()
         
@@ -196,8 +211,9 @@ class TabulatedSeries(torch.utils.data.Dataset):
         out_list = []
         
         for path in paths:
-            
-            image = torch.from_numpy( np.load(path) ).float().unsqueeze(0).unsqueeze(0) # 1x res x res image
+            image = torch.from_numpy( np.load(path) ).float().unsqueeze(0) # 1x res x res image
+            if image.ndim < 4: # need to add an extra dimension if npy data are 2D (no explicit channel dimension)
+                image = image.unsqueeze(0)
             out_list.append(image)
             
         # rotation management block
@@ -229,11 +245,6 @@ class TabulatedSeries(torch.utils.data.Dataset):
                 if ver_flip:
                     out_list[ii] = torch.flip(out_list[ii], dims=(-1,))
         
-        # apply transforms
-        #if self.transform:
-            #for ii in range(len(out_list)):
-                #out_list[ii] = self.transform(out_list[ii])
-            
         out_tensor = torch.cat(out_list, dim=0)
                 
         return out_tensor, params

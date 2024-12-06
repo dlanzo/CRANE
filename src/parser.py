@@ -221,7 +221,18 @@ class GeneralParser():
             action      = 'store_true',
             help        = 'Toggles saving the output in npy format'
             )
+
+        self.parser.add_argument(
+            '--pooling',
+            action      = 'store_true',
+            help        = 'Toggles pooling to increase receptive field in convolutions'
+            )
         
+        self.parser.add_argument(
+            '--zero_mean',
+            action      = 'store_true',
+            help        = 'Toggles zero mean in non-divergence training'
+            )
         
     def parse_args(self):
         
@@ -250,6 +261,12 @@ class GeneralParser():
             args.crop = False
         else:
             args.crop = True
+
+        if args.pooling and args.extract_param:
+            raise NotImplementedError( 'Rescaling dimension and extraction of the paramters at the same time are not supported at the moment.' )
+
+        if args.pooling and args.threeD:
+            raise NotImplementedError( 'Pooling is not currently supported fro 3D evolutions.' )
             
         return args
 
@@ -395,6 +412,13 @@ class TrainingParser( GeneralParser ):
             type        = float,
             default     = 0.0,
             help        = 'Noise regularization to be used during training (standard deviation of gaussian noise corruption in series generation, should make the Net more resilient to wrong projections in next state)'
+            )
+
+        self.parser.add_argument(
+            '--gradloss_weight',
+            type        = float,
+            default     = 0.0,
+            help        = 'Hyperparamter for regularizing base on the difference between squared gradient of fields'
             )
         
         

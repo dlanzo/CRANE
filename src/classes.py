@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 from torch.fft import fft2, ifft2, rfft2, irfft2
+
+from typing import Union
 # --- import external stuff ---
 
 # <<< import my stuff <<<
@@ -166,6 +168,125 @@ class BiSymmetric(nn.Module):
         return a+b
 
 
+
+
+class ResBlock(nn.Module):
+    '''
+    This class implements a simple residual block. The possibility of inserting resolution reduction (factor 2 only for the moment) via convolution is also implemented.
+    '''
+    def __init__(
+        self,
+        in_channels     : int,
+        out_channels    : int,
+        kernel_size     : int,
+        res_compression : bool,
+        padding_mode    : str
+        ):
+
+        self.in_channels     : int  = in_channels
+        self.out_channels    : int  = out_channels
+        self.kernel_size     : int  = kernel_size
+        self.res_compression : bool = res_compression
+        self.padding_mode    : str  = padding_mode   
+
+
+        super().__init__()
+
+        if self.res_compression:
+            self.skip_connection    : nn.modules.conv.Conv2d = nn.Conv2d(       # this is a "self-pooling layer"
+                in_channels     = self.in_channels,
+                out_channels    = self.out_channels,
+                kernel_size     = 2,
+                padding         = 0,
+                stride          = 2
+                )
+            self.block              : nn.modules.container.Sequential = nn.Sequential(
+                nn.Conv2d(
+                    in_channels     = self.in_channels,
+                    out_channels    = self.out_channels,
+                    kernel_size     = self.kernel_size,
+                    padding         = self.kernel_size//2,
+                    padding_mode    = self.padding_mode
+                    ),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels     = self.out_channels,
+                    out_channels    = self.out_channels,
+                    kernel_size     = 2,
+                    padding         = 0,
+                    stride          = 2
+                    )
+                )
+
+        else:
+            self.skip_connection    : nn.modules.conv.Conv2d = nn.Conv2d(
+                in_channels     = self.in_channels,
+                out_channels    = self.out_channels,
+                kernel_size     = self.kernel_size,
+                padding         = self.kernel_size//2,
+                padding_mode    = self.padding_mode
+                )
+            self.block              : nn.modules.container.Sequential = nn.Sequential(
+                nn.Conv2d(
+                    in_channels     = self.in_channels,
+                    out_channels    = self.out_channels,
+                    kernel_size     = self.kernel_size,
+                    padding         = self.kernel_size//2,
+                    padding_mode    = self.padding_mode
+                    ),
+                nn.ReLU(),
+                nn.Conv2d(
+                    in_channels     = self.out_channels,
+                    out_channels    = self.out_channels,
+                    kernel_size     = self.kernel_size,
+                    padding         = self.kernel_size//2,
+                    padding_mode    = self.padding_mode
+                    )
+                )
+
+        
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        '''
+        This is the forward method
+        '''
+        return self.block(x) + self.skip_connection(x)
+
+
+
+class UpscaleLayer(nn.Module):
+    '''
+    This is a class implementing an upscaling (x2 factor only for the moment) procedure based on transposed convolutions
+    '''
+    
+    def __init__(
+        self,
+        in_channels     : int, 
+        out_channels    : int,
+        padding_mode    : str
+        ) -> None:
+
+        super().__init__()
+
+        self.in_channels     : int  = in_channels
+        self.out_channels    : int  = out_channels
+        self.padding_mode    : str  = padding_mode
+
+        self.net    : nn.modules.conv.ConvTranspose2d    = nn.ConvTranspose2d(
+            in_channels     = self.in_channels,
+            out_channels    = self.out_channels,
+            padding         = 1,
+            stride          = 2,
+            kernel_size     = 4,
+            #padding_mode    = self.padding_mode,
+            )
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+
+
+
 class ConvGRUCell_parallel_3D(ConvGRUCell_parallel):
     '''
     This subclass implements the convGRU with 3D convolutions
@@ -245,12 +366,36 @@ class ConvGRUCell_parallel_3D(ConvGRUCell_parallel):
         raise NotImplementedError('Symmetrization is not implemented for 3D convolutions')
 
 
+
+
+
+
+
+
 class ConvGRU(nn.Module):
     '''
     This class defines a module stacking multiple ConvGRU together. The module also provides an additional output layer producing a B&W image using a sigmoid activation function
     '''
     
-    def __init__(self, hidden_units, input_channels, output_channels, hidden_channels, kernel_size, padding_mode, separable=False, reduce_out=True, squash_out=True, bias=True, divergence=True, num_params=0,  dropout=False, dropout_prob=None):
+    def __init__(
+        self,
+        hidden_units    : int,
+        input_channels  : int,
+        output_channels : int,
+        hidden_channels : int,
+        kernel_size     : int,
+        padding_mode    : str,
+        separable       : bool          = False,
+        reduce_out      : bool          = True,
+        squash_out      : bool          = True,
+        bias            : bool          = True,
+        divergence      : bool          = True,
+        num_params      : int           = 0,
+        pooling         : bool          = False,
+        zero_mean       : bool          = False,
+        dropout         : bool          = False,
+        dropout_prob    : Union[float, None]  = None
+        ):
         '''
         init function
         '''
@@ -274,14 +419,55 @@ class ConvGRU(nn.Module):
         
         self.dropout            = dropout
         self.dropout_prob       = dropout_prob
+
+        self.pooling            = pooling
+        self.zero_mean          = zero_mean
         
         self.GRU_list   = nn.ModuleList()
         
         self.bias       = bias
         
         self.div_mode   = divergence
-        
-        self.toOut      = nn.Sequential(
+
+        if self.zero_mean: self.squash_out = False # override squash_out for zero mean output
+
+        if self.pooling:
+            upscaler = nn.Sequential(
+                UpscaleLayer(
+                    in_channels     = self.hidden_channels,
+                    out_channels    = self.hidden_channels,
+                    padding_mode    = 'zeros'
+                    ),
+                nn.ReLU(),
+                UpscaleLayer(
+                    in_channels     = self.hidden_channels,
+                    out_channels    = self.hidden_channels,
+                    padding_mode    = 'zeros'
+                    )
+                )
+        else:
+            upscaler = nn.Identity() # empty upscaler if no resizing is happening
+            
+        # this is a utility subnet which projects (lifts) the input image to a higher dimensional representation using a residual block. If specified, uses a pooling operation
+        self.lifter = nn.Sequential(
+            ResBlock(
+                in_channels     = self.input_channels + self.num_params,
+                out_channels    = self.hidden_channels,
+                kernel_size     = self.kernel_size,
+                res_compression = self.pooling,
+                padding_mode    = self.padding_mode
+                ),
+                ResBlock(
+                in_channels     = self.hidden_channels,
+                out_channels    = self.hidden_channels,
+                kernel_size     = self.kernel_size,
+                res_compression = self.pooling,
+                padding_mode    = self.padding_mode
+                )
+            )
+
+        to_out_list      = [
+            upscaler,
             nn.Conv2d(
                 in_channels     = self.hidden_channels,
                 out_channels    = self.hidden_channels,
@@ -306,26 +492,579 @@ class ConvGRU(nn.Module):
             nn.Tanh(),
             nn.Conv2d(
                 in_channels     = self.hidden_channels,
-                out_channels    = self.input_channels if not self.div_mode else 2*self.input_channels,
+                out_channels    = self.input_channels if not self.div_mode else self.input_channels+1,
                 kernel_size     = 3,
                 stride          = 1,
                 padding         = 1,
                 padding_mode    = self.padding_mode,
                 bias            = self.bias
                 )
-            )
+            ]
+
+        self.toOut = nn.Sequential(*to_out_list)
+
         self.sigmoid = nn.Sigmoid()
         
         for kk in range(self.hidden_units):
-            
-            if kk == 0:
-                in_channels = self.input_channels + self.num_params
-            else:
-                in_channels = self.hidden_channels
-                
+               
             self.GRU_list.append(
                 ConvGRUCell_parallel(
-                    in_channels     = in_channels,
+                    in_channels     = self.hidden_channels,
+                    hidden_channels = self.hidden_channels,
+                    kernel_size     = self.kernel_size,
+                    padding_mode    = self.padding_mode,
+                    separable       = self.separable,
+                    bias            = self.bias
+                    )
+                )
+
+        P = 0.001*np.random.randn(4)
+        P[2] = -np.abs(P[2])
+        P[3] = np.abs(P[3])
+        self.P = nn.parameter.Parameter( torch.from_numpy(P).float() )
+
+        self.q2, self.q4, self.q6 = (None, None, None)
+
+
+    def build_spectral_operators(self, x : torch.Tensor) -> torch.Tensor:
+        '''
+        This method constructs differential operators in Fourier space
+        '''
+        
+        print('Constructing spectral operators...', end='')
+
+        Lx, Ly = x.shape[-2], x.shape[-1] # the spatial dimension
+        self.q2 = torch.zeros(1,1,Lx,Ly, device=x.device)
+        
+        for xx in range(-Lx//2, Lx//2):
+            for yy in range(-Ly//2,Ly//2):
+                self.q2[...,xx,yy] = (xx*2*np.pi/Lx)**2 + (yy*2*np.pi/Ly)**2
+
+        self.q4 = self.q2**2
+        self.q6 = self.q2**3
+
+        # better safe than sorry: disable gradient for q operators
+        self.q2.requires_grad = False
+        self.q4.requires_grad = False
+        self.q6.requires_grad = False
+
+        print('DONE!')
+
+
+    def semiimplicit_update(
+        self,
+        previous_state  : torch.Tensor,
+        NN_output       : torch.Tensor
+        ) -> torch.Tensor:
+        '''
+        This function updates the state of the system using a semi-implicit Euler integration scheme ansatz
+        '''
+        previous_state_ = torch.fft.fft2(previous_state)
+        NN_output_ = torch.fft.fft2(NN_output)
+        denominator = 1 + (self.P[1])*self.q2 - (self.P[2])*self.q4 + torch.abs(self.P[3])*self.q6
+
+        return torch.fft.ifft2( (previous_state_ + NN_output_)/denominator ).real
+
+
+    def semiimplicit_update_v(
+        self,
+        previous_state      : torch.Tensor,
+        NN_output           : torch.Tensor
+        ) -> torch.Tensor:
+        '''
+        This updates the velocity field using a semi-implicit Euler integration scheme ansatz also for the velocity field (2nd order assumption on spatial derivatives)
+        '''
+        previous_state_ = torch.fft.fft2( previous_state )
+        NN_output_      = torch.fft.fft2( NN_output )
+        denominator     = 1 + torch.abs(self.P[0])*self.q2
+
+        return torch.fft.ifft2( (previous_state_ + NN_output_)/denominator ).real
+
+
+        
+    def make_div_filters(self, x):
+        '''
+        This method constructs the divergence filters
+        '''
+        
+        print('Constructing differential operators as filters...', end='')
+        
+        grad1 = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False, padding_mode=self.padding_mode)
+        grad2 = nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1, bias=False, padding_mode=self.padding_mode)
+        
+        grady_matrix = np.array([[0,0,0],[1,0,-1],[0,0,0]])
+        gradx_matrix = np.array([[0,1,0],[0,0,0],[0,-1,0]])
+        
+        grad1.weight = nn.Parameter(torch.from_numpy(gradx_matrix).float().unsqueeze(0).unsqueeze(0))
+        grad2.weight = nn.Parameter(torch.from_numpy(grady_matrix).float().unsqueeze(0).unsqueeze(0))
+        
+        grad1.requires_grad = False
+        grad2.requires_grad = False
+        
+        grad1.to(x.device)
+        grad2.to(x.device)
+        
+        self.divergence_filters = [grad1, grad2]
+        
+        print('DONE!')
+    
+    def divergence(self, x):
+        '''
+        This method calculates the divergence of the given field using finite differences approximation
+        '''
+        
+        Jx, Jy = torch.split(x, 1, dim=1)
+
+        Jx = Jx - torch.mean(Jx, dim=(-1,-2), keepdim=True)
+        Jy = Jy - torch.mean(Jy, dim=(-1,-2), keepdim=True)
+        
+        gradx = self.divergence_filters[0](Jx)
+        grady = self.divergence_filters[1](Jy)
+        
+        divergence = gradx+grady
+        
+        return divergence
+
+
+    def gradient(self, x):
+        '''
+        This method calculates the gradient of a given (scalar) field using finite difference approximation
+        '''
+
+        gradx = self.divergence_filters[0](x)
+        grady = self.divergence_filters[1](x)
+
+        return torch.cat((gradx, grady), dim=1)
+
+
+    def dot(self, x, y):
+        '''
+        This method calculates the dot product between two different vector fields
+        '''
+        x1, x2 = torch.split(x, 1, dim=1)
+        y1, y2 = torch.split(y, 1, dim=1)
+
+        return x1*y1 + x2*y2
+
+    
+    def symmetrize(self):
+        for GRU_cell in self.GRU_list:
+            GRU_cell.symmetrize()
+            
+            
+    def make_dropout_list(self, in_sequence, approx_inference):
+        '''
+        This method makes a dropout list for hidden list
+        '''
+        device = in_sequence.device
+        dropout_tensor_shape = (in_sequence.shape[0], self.hidden_units, self.hidden_channels)  # shape is ( num_examples x num_convolutions x num_channels_for_convolution) 
+        dropout_tensor = torch.rand(dropout_tensor_shape, device=device)
+        
+        if approx_inference:
+            self.dropout_mask =  (dropout_tensor <= self.dropout_prob).float()/(1-self.dropout_prob) # <-- this is already ok for mutliplication with hidden channels
+        else:
+            self.dropout_mask = 1
+    
+    
+    def forward_old(self, in_sequence, future=0, params=None, noise_reg=0.0, approx_inference=True):
+        '''
+        This method is called from forward if you are not in divergence mode
+        '''
+        
+        # selecting dropout channels in hidden state
+        if self.dropout: self.make_dropout_list(in_sequence, approx_inference)
+        
+        outputs = []
+        hidden_list = []
+        
+        device = in_sequence.device #'cuda' if in_sequence.is_cuda else 'cpu'
+
+        rescaling_factor = 1 if not self.pooling else 4
+
+        for ll in range(self.hidden_units):
+            hidden_list.append(
+                torch.zeros(
+                    in_sequence.size(0),
+                    self.hidden_channels,
+                    in_sequence.size(3)//rescaling_factor,
+                    in_sequence.size(4)//rescaling_factor,
+                    device=device,
+                    requires_grad=False
+                    )
+                )
+
+        for input_t in in_sequence.split(1, dim=1):
+            
+            input_t_old = input_t.squeeze(1) # squeeze always required to avoid nasty casting
+            
+            if noise_reg != 0:
+                input_t = input_t + noise_reg*torch.randn(input_t.shape, device=input_t.device)
+            
+            input_t = self.cat_params(input_t, params)
+            input_t = self.lifter(input_t.squeeze(1))
+            
+            for kk in range(self.hidden_units):
+
+                if kk==0:
+                    hidden_list[kk] = self.GRU_list[kk](input_t, hidden_list[kk])
+                else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
+                    
+                if self.dropout:
+                    for example in range(in_sequence.shape[0]): # iterate in the batch dimension
+                        for channel in range(self.hidden_channels):
+                            hidden_list[kk][example,channel,:,:] = hidden_list[kk][example,channel,:,:]*self.dropout_mask[example, kk, channel] # this will zero-out some of the hidden shapes
+            
+            if self.reduce_out:
+                output = self.toOut(hidden_list[-1])
+                if self.squash_out:
+                    output = self.sigmoid(output)
+            else:
+                output = hidden_list[-1]
+                
+            if self.zero_mean:
+                output = output - torch.mean(output, keepdim=True, dim=(-1,-2))
+                output = input_t_old + output
+
+
+            outputs += [output]
+            
+        for _ in range(future):
+
+            if noise_reg != 0:
+                output = output + noise_reg*torch.randn(output.shape, device=output.device)
+            
+            for kk in range(self.hidden_units):
+                
+                if kk==0:
+                    hidden_list[kk] = self.GRU_list[kk]( self.lifter(self.cat_params(output, params)), hidden_list[kk] )
+                else:
+                    hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
+                
+                if self.dropout:
+                    for example in range(in_sequence.shape[0]): # iterate in the batch dimension
+                        for channel in range(self.hidden_channels):
+                            hidden_list[kk][example,channel,:,:] = hidden_list[kk][example,channel,:,:]*self.dropout_mask[example, kk, channel] # this will zero-out some of the hidden shapes
+            
+            if self.reduce_out:
+                output = self.toOut(hidden_list[-1])
+                if self.squash_out:
+                    output = self.sigmoid(output)
+            else:
+                output = hidden_list[-1]
+
+            if self.zero_mean:
+                output = output - torch.mean(output, keepdim=True, dim=(-1,-2))
+                output = outputs[-1] + output
+
+            outputs += [output]
+        
+        outputs = torch.stack(outputs, dim=1)
+
+        return outputs
+    
+    
+    def forward_div(self, in_sequence, future=0, params=None, noise_reg=0.0, approx_inference=True):
+        '''
+        This method is called in divergence mode; BETA
+        '''
+        
+        # dropout stuff
+        if self.dropout: self.make_dropout_list(in_sequence,approx_inference)
+
+        if self.q2 is None:
+            self.build_spectral_operators(in_sequence)
+        
+        outputs = []
+        hidden_list = []
+        
+        device = in_sequence.device#'cuda' if in_sequence.is_cuda else 'cpu'
+
+        rescaling_factor = 1 if not self.pooling else 4
+
+        for ll in range(self.hidden_units):
+            hidden_list.append(
+                torch.zeros(
+                    in_sequence.size(0),
+                    self.hidden_channels,
+                    in_sequence.size(3)//rescaling_factor,
+                    in_sequence.size(4)//rescaling_factor,
+                    device=device,
+                    requires_grad=False
+                    )
+                )
+
+        for input_t in in_sequence.split(1, dim=1):
+            
+            input_t_old = input_t
+            input_t = self.cat_params(input_t, params)
+            input_t = self.lifter(input_t.squeeze(1))
+
+            for kk in range(self.hidden_units):
+
+                if kk==0:
+                    hidden_list[kk] = self.GRU_list[kk](input_t, hidden_list[kk])
+                else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
+                
+                if self.dropout:
+                    for example in range(in_sequence.shape[0]): # iterate in the batch dimension
+                        for channel in range(self.hidden_channels):
+                            hidden_list[kk][example,channel,:,:] = hidden_list[kk][example,channel,:,:]*self.dropout_mask[example, kk, channel] # this will zero-out some of the hidden shapes
+            
+            if self.reduce_out:
+                output = self.toOut(hidden_list[-1])
+                if self.squash_out:
+                    J, v = torch.split(output, 2, dim=1)# splitting the output in density field and velocity field
+                    output = torch.cat(
+                        (self.semiimplicit_update( input_t_old[:,:,0,...], self.divergence(J)), #input_t_old[:,:,0,...] + self.divergence(J),
+                            self.semiimplicit_update_v(input_t_old[:,:,1:,...].squeeze(1), v)),#input_t_old[:,:,1:,...].squeeze(1) + v),
+                        dim = 1)
+
+            else:
+                output = hidden_list[-1]
+                J, v = torch.split(output, 2, dim=1)# splitting the output in density field and velocity field
+                output = torch.cat(
+                    (self.semiimplicit_update( input_t_old[:,:,0,...], self.divergence(J) ),#input_t_old[:,:,0,...] + self.divergence(J),
+                        self.semiimplicit_update_v(input_t_old[:,:,1:,...].squeeze(1), v)),#input_t_old[:,:,1:,...].squeeze(1) + v),
+                    dim = 1)
+                
+            outputs += [output]    
+            
+            if noise_reg != 0:
+                noise   = noise_reg*torch.randn(output.shape, device=output.device)
+                noise   = noise - torch.mean(noise, dim=(-1,-2), keepdim=True)
+                output  = output + noise
+            
+        for _ in range(future):
+           
+            output_old = output
+            output = self.cat_params(output, params)
+            output = self.lifter(output)
+            
+            for kk in range(self.hidden_units):
+                
+                if kk==0: hidden_list[kk] = self.GRU_list[kk](output, hidden_list[kk])
+                else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
+                
+                if self.dropout:
+                    for example in range(in_sequence.shape[0]): # iterate in the batch dimension
+                        for channel in range(self.hidden_channels):
+                            hidden_list[kk][example,channel,:,:] = hidden_list[kk][example,channel,:,:]*self.dropout_mask[example, kk, channel] # this will zero-out some of the hidden shapes
+            
+            if self.reduce_out:
+                output = self.toOut(hidden_list[-1])
+                if self.squash_out:
+                    J, v = torch.split(output, 2, dim=1) # splitting diffusion and advection components
+                    output = torch.cat(
+                        (self.semiimplicit_update(output_old[:,0,...].unsqueeze(1), self.divergence(J) ),#output_old[:,0,...].unsqueeze(1) + self.divergence(J),
+                            self.semiimplicit_update_v(output_old[:,1:,...], v)),#output_old[:,1:,...] + v),
+                        dim = 1
+                        )
+            else:
+                output = hidden_list[-1]
+                J, v = torch.split(output, 2, dim=1) # splitting diffusion and advection components
+                output = torch.cat(
+                    (self.semiimplicit_update(output_old[:,0,...].unsqueeze(1), self.divergence(J) ),#output_old[:,0,...].unsqueeze(1) + self.divergence(J),
+                        self.semiimplicit_update_v(output_old[:,1:,...], v)),#output_old[:,1:,...] + v),
+                    dim = 1
+                    )
+            
+            outputs += [output]
+            
+            if noise_reg != 0:
+                noise = noise_reg*torch.randn(output.shape, device=output.device)
+                noise = noise - torch.mean(noise, dim=(-1,-2), keepdim=True)
+                output = output + noise
+        
+        outputs = torch.stack(outputs, dim=1)
+
+        return outputs
+    
+
+
+    def cat_params(self, in_sequence, params):
+        '''
+        This method extends the parameter tensor with external parameters
+        '''
+        if params is not None:
+            #raise NotImplementedError('Parameter passing to the NN is not implemented yet... Aborting.')
+
+            num_params_from_loader = len(params)
+
+            if num_params_from_loader != self.num_params:
+                raise ValueError('The number of parameters provided by the dataloader is not consistent with the one in the NN model.')
+
+            shapes = list(in_sequence.shape)
+            shapes[-3] = shapes[-3]+self.num_params
+            in_sequence = in_sequence.expand(shapes).clone()
+
+            for cc, params_batch in enumerate(params): # cycling on batches
+                for bb, param in enumerate(params_batch): # cycling on channels
+                    if len(shapes) == 5: in_sequence[bb,:,-(cc+1),:,:] = in_sequence[bb,:,-(cc+1),:,:]*0 + param.float()
+                    else: in_sequence[bb,-(cc+1),:,:] = in_sequence[bb,-(cc+1),:,:]*0 + param.float()
+
+            return in_sequence
+        
+        else:
+            return in_sequence
+
+
+    def forward(self, in_sequence, future=0, params=None, noise_reg=0.0, approx_inference=True):
+        
+        #in_sequence = self.cat_params(in_sequence, params)
+        
+        if self.div_mode:
+            return self.forward_div(in_sequence, future, params=params, noise_reg=noise_reg, approx_inference=approx_inference) # conservative dynamics
+        else:
+            return self.forward_old(in_sequence, future, params=params, noise_reg=noise_reg, approx_inference=approx_inference) # non conservative dynamics
+ 
+
+
+
+
+
+
+
+
+
+
+class ConvGRU_old(nn.Module):
+    '''
+    This class defines a module stacking multiple ConvGRU together. The module also provides an additional output layer producing a B&W image using a sigmoid activation function
+    '''
+    
+    def __init__(
+        self,
+        hidden_units    : int,
+        input_channels  : int,
+        output_channels : int,
+        hidden_channels : int,
+        kernel_size     : int,
+        padding_mode    : str,
+        separable       : bool          = False,
+        reduce_out      : bool          = True,
+        squash_out      : bool          = True,
+        bias            : bool          = True,
+        divergence      : bool          = True,
+        num_params      : int           = 0,
+        pooling         : bool          = False,
+        zero_mean       : bool          = False,
+        dropout         : bool          = False,
+        dropout_prob    : Union[float, None]  = None
+        ):
+        '''
+        init function
+        '''
+        
+        super(ConvGRU, self).__init__()
+        
+        self.input_channels     = input_channels # number of "real" channels (evolving fields WITHOUT considering external parameters)
+        self.hidden_units       = hidden_units
+        self.hidden_channels    = hidden_channels
+        self.kernel_size        = kernel_size
+        self.padding_mode       = padding_mode
+        
+        self.output_channels    = output_channels
+
+        self.num_params         = num_params # number of additional channels due to external parameters
+        
+        self.separable          = separable
+        
+        self.reduce_out         = reduce_out
+        self.squash_out         = squash_out
+        
+        self.dropout            = dropout
+        self.dropout_prob       = dropout_prob
+
+        self.pooling            = pooling
+        self.zero_mean          = zero_mean
+        
+        self.GRU_list   = nn.ModuleList()
+        
+        self.bias       = bias
+        
+        self.div_mode   = divergence
+
+        if self.zero_mean: self.squash_out = False # override squash_out for zero mean output
+
+        if self.pooling:
+            upscaler = nn.Sequential(
+                UpscaleLayer(
+                    in_channels     = self.hidden_channels,
+                    out_channels    = self.hidden_channels,
+                    padding_mode    = 'zeros'
+                    ),
+                nn.Tanh(),
+                UpscaleLayer(
+                    in_channels     = self.hidden_channels,
+                    out_channels    = self.hidden_channels,
+                    padding_mode    = 'zeros'
+                    )
+                )
+        else:
+            upscaler = nn.Identity() # empty upscaler if no resizing is happening
+            
+        # this is a utility subnet which projects (lifts) the input image to a higher dimensional representation using a residual block. If specified, uses a pooling operation
+        self.lifter = nn.Sequential(
+            ResBlock(
+                in_channels     = self.input_channels + self.num_params,
+                out_channels    = self.hidden_channels,
+                kernel_size     = self.kernel_size,
+                res_compression = self.pooling,
+                padding_mode    = self.padding_mode
+                ),
+            ResBlock(
+                in_channels     = self.hidden_channels,
+                out_channels    = self.hidden_channels,
+                kernel_size     = self.kernel_size,
+                res_compression = self.pooling,
+                padding_mode    = self.padding_mode
+            )
+            )
+
+        to_out_list      = [
+            upscaler,
+            nn.Conv2d(
+                in_channels     = self.hidden_channels,
+                out_channels    = self.hidden_channels,
+                kernel_size     = 1,
+                stride          = 1,
+                padding         = 0,
+                padding_mode    = self.padding_mode,
+                bias            = self.bias
+                
+                ),
+            nn.Tanh(),
+            nn.Conv2d(
+                in_channels     = self.hidden_channels,
+                out_channels    = self.hidden_channels,
+                kernel_size     = 1,
+                stride          = 1,
+                padding         = 0,
+                padding_mode    = self.padding_mode,
+                bias            = self.bias
+                
+                ),
+            nn.Tanh(),
+            nn.Conv2d(
+                in_channels     = self.hidden_channels,
+                out_channels    = self.input_channels if not self.div_mode else self.input_channels+1,
+                kernel_size     = 3,
+                stride          = 1,
+                padding         = 1,
+                padding_mode    = self.padding_mode,
+                bias            = self.bias
+                )
+            ]
+
+        self.toOut = nn.Sequential(*to_out_list)
+
+        self.sigmoid = nn.Sigmoid()
+        
+        for kk in range(self.hidden_units):
+               
+            self.GRU_list.append(
+                ConvGRUCell_parallel(
+                    in_channels     = self.hidden_channels,
                     hidden_channels = self.hidden_channels,
                     kernel_size     = self.kernel_size,
                     padding_mode    = self.padding_mode,
@@ -374,10 +1113,31 @@ class ConvGRU(nn.Module):
         gradx = self.divergence_filters[0](Jx)
         grady = self.divergence_filters[1](Jy)
         
-        divergence = gradx+grady
+        divergence = Jx - Jx.mean(dim=(-1,-2), keepdim=True)#gradx+grady
         
         return divergence
-    
+
+
+    def gradient(self, x):
+        '''
+        This method calculates the gradient of a given (scalar) field using finite difference approximation
+        '''
+
+        gradx = self.divergence_filters[0](x)
+        grady = self.divergence_filters[1](x)
+
+        return torch.cat((gradx, grady), dim=1)
+
+
+    def dot(self, x, y):
+        '''
+        This method calculates the dot product between two different vector fields
+        '''
+        x1, x2 = torch.split(x, 1, dim=1)
+        y1, y2 = torch.split(y, 1, dim=1)
+
+        return x1*y1 + x2*y2
+
     
     def symmetrize(self):
         for GRU_cell in self.GRU_list:
@@ -411,22 +1171,34 @@ class ConvGRU(nn.Module):
         
         device = in_sequence.device #'cuda' if in_sequence.is_cuda else 'cpu'
 
+        rescaling_factor = 1 if not self.pooling else 4
+
         for ll in range(self.hidden_units):
-            hidden_list.append(torch.zeros(in_sequence.size(0), self.hidden_channels, in_sequence.size(3), in_sequence.size(4), device=device, requires_grad=False))
+            hidden_list.append(
+                torch.zeros(
+                    in_sequence.size(0),
+                    self.hidden_channels,
+                    in_sequence.size(3)//rescaling_factor,
+                    in_sequence.size(4)//rescaling_factor,
+                    device=device,
+                    requires_grad=False
+                    )
+                )
 
         for input_t in in_sequence.split(1, dim=1):
             
-            input_t_old = input_t
+            input_t_old = input_t.squeeze(1) # squeeze always required to avoid nasty casting
             
             if noise_reg != 0:
                 input_t = input_t + noise_reg*torch.randn(input_t.shape, device=input_t.device)
             
             input_t = self.cat_params(input_t, params)
+            input_t = self.lifter(input_t.squeeze(1))
             
             for kk in range(self.hidden_units):
 
                 if kk==0:
-                    hidden_list[kk] = self.GRU_list[kk](input_t.squeeze(1), hidden_list[kk])
+                    hidden_list[kk] = self.GRU_list[kk](input_t, hidden_list[kk])
                 else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
                     
                 if self.dropout:
@@ -441,18 +1213,24 @@ class ConvGRU(nn.Module):
             else:
                 output = hidden_list[-1]
                 
+            if self.zero_mean:
+                output = output - torch.mean(output, keepdim=True, dim=(-1,-2))
+                output = input_t_old + output
+
+
             outputs += [output]
             
         for _ in range(future):
-            
+
             if noise_reg != 0:
                 output = output + noise_reg*torch.randn(output.shape, device=output.device)
             
-            
             for kk in range(self.hidden_units):
                 
-                if kk==0: hidden_list[kk] = self.GRU_list[kk](self.cat_params(output, params), hidden_list[kk])
-                else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
+                if kk==0:
+                    hidden_list[kk] = self.GRU_list[kk]( self.lifter(self.cat_params(output, params)), hidden_list[kk] )
+                else:
+                    hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
                 
                 if self.dropout:
                     for example in range(in_sequence.shape[0]): # iterate in the batch dimension
@@ -465,6 +1243,11 @@ class ConvGRU(nn.Module):
                     output = self.sigmoid(output)
             else:
                 output = hidden_list[-1]
+
+            if self.zero_mean:
+                output = output - torch.mean(output, keepdim=True, dim=(-1,-2))
+                output = outputs[-1] + output
+
             outputs += [output]
         
         outputs = torch.stack(outputs, dim=1)
@@ -485,18 +1268,30 @@ class ConvGRU(nn.Module):
         
         device = in_sequence.device#'cuda' if in_sequence.is_cuda else 'cpu'
 
+        rescaling_factor = 1 if not self.pooling else 4
+
         for ll in range(self.hidden_units):
-            hidden_list.append(torch.zeros(in_sequence.size(0), self.hidden_channels, in_sequence.size(3), in_sequence.size(4), device=device, requires_grad=False))
+            hidden_list.append(
+                torch.zeros(
+                    in_sequence.size(0),
+                    self.hidden_channels,
+                    in_sequence.size(3)//rescaling_factor,
+                    in_sequence.size(4)//rescaling_factor,
+                    device=device,
+                    requires_grad=False
+                    )
+                )
 
         for input_t in in_sequence.split(1, dim=1):
             
             input_t_old = input_t
             input_t = self.cat_params(input_t, params)
+            input_t = self.lifter(input_t.squeeze(1))
 
             for kk in range(self.hidden_units):
 
                 if kk==0:
-                    hidden_list[kk] = self.GRU_list[kk](input_t.squeeze(1), hidden_list[kk])
+                    hidden_list[kk] = self.GRU_list[kk](input_t, hidden_list[kk])
                 else: hidden_list[kk] = self.GRU_list[kk](hidden_list[kk-1], hidden_list[kk])
                 
                 if self.dropout:
@@ -507,11 +1302,19 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
-                    #output = input_t.squeeze(1)+self.divergence(output)
-                    output = input_t_old.squeeze(1)+self.divergence(output)
+                    J, v = torch.split(output, 2, dim=1)# splitting the output in density field and velocity field
+                    output = torch.cat(
+                            (input_t_old[:,:,0,...] + self.divergence(J),
+                            input_t_old[:,:,1:,...].squeeze(1) + v),
+                        dim = 1)
+
             else:
                 output = hidden_list[-1]
-                output = input_t_old.squeeze(1)+self.divergence(output)
+                J, v = torch.split(output, 2, dim=1)# splitting the output in density field and velocity field
+                output = torch.cat(
+                    (input_t_old[:,:,0,...] + self.divergence(J),
+                    input_t_old[:,:,1:,...].squeeze(1) + v),
+                    dim = 1)
                 
             outputs += [output]    
             
@@ -521,9 +1324,10 @@ class ConvGRU(nn.Module):
                 output  = output + noise
             
         for _ in range(future):
-            
+           
             output_old = output
             output = self.cat_params(output, params)
+            output = self.lifter(output)
             
             for kk in range(self.hidden_units):
                 
@@ -538,10 +1342,18 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
-                    output = output_old+self.divergence(output)
+                    J, v = torch.split(output, 2, dim=1) # splitting diffusion and advection components
+                    output = torch.cat(
+                        (output_old[:,0,...].unsqueeze(1) + self.divergence(J),
+                        output_old[:,1:,...] + v),
+                        dim = 1)
             else:
                 output = hidden_list[-1]
-                output = output_old+self.divergence(output)
+                J, v = torch.split(output, 2, dim=1) # splitting diffusion and advection components
+                output = torch.cat(
+                        (output_old[:,0,...].unsqueeze(1) + self.divergence(J),
+                    output_old[:,1:,...] + v),
+                    dim = 1)
             
             outputs += [output]
             

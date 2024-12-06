@@ -262,18 +262,18 @@ def log_epoch_end_info(epoch, epoch_time, vals, train_loss, valid_loss, args):
     '''
     pred, true = vals
     with torch.no_grad():
-        min_pred = torch.min(pred[0,-1,:,:,:]).item()
-        max_pred = torch.max(pred[0,-1,:,:,:]).item()
-        min_true = torch.min(true[0,-1,:,:,:]).item()
-        max_true = torch.max(true[0,-1,:,:,:]).item()
+        min_pred = torch.min(pred[0,-1,0,:,:]).item()
+        max_pred = torch.max(pred[0,-1,0,:,:]).item()
+        min_true = torch.min(true[0,-1,0,:,:]).item()
+        max_true = torch.max(true[0,-1,0,:,:]).item()
         
         max_deviation = torch.max(
-            torch.abs( true[0,-1,:,:,:] - pred[0,-1,:,:,:] )
+            torch.abs( true[0,-1,0,:,:] - pred[0,-1,0,:,:] )
             ).item()
         
-        area_pred = torch.mean(pred[0,-1,:,:,:])
-        area_pred_init = torch.mean(pred[0,0,:,:,:])
-        area_true = torch.mean(true[0,-1,:,:,:])
+        area_pred = torch.mean(pred[0,-1,0,:,:])
+        area_pred_init = torch.mean(pred[0,0,0,:,:])
+        area_true = torch.mean(true[0,-1,0,:,:])
         
         area_delta_last = 100*(area_pred-area_true)/(area_true+1e-6)
         area_delta_start_end = 100*(-area_pred+area_pred_init)/(area_pred_init+1e-6)
@@ -706,9 +706,10 @@ def seq2vtk(y_pred, path, start_snap=0):
             save_vtk(y_pred.numpy()[0,kk,0,:,:,:], path=f'{path}/snap_{kk+start_snap}.vtk')
     elif y_pred.ndim == 5: # a 2D evolution is passed: we need to add a fake spatial dimension
         for kk in range(y_pred.shape[1]): # we are still looping over time
-            snap = y_pred[0,kk,0,...].numpy()
-            snap = np.expand_dims(snap, 0)
-            save_vtk(snap, path=f'{path}/snap_{kk+start_snap}.vtk')
+            for jj in range(y_pred.shape[2]): # we also need to iterate over channels
+                snap = y_pred[0,kk,jj,...].numpy()
+                snap = np.expand_dims(snap, 0)
+                save_vtk(snap, path=f'{path}/component_{jj}_snap_{kk+start_snap}.vtk')
     else: # data is not in the correct format
         raise ValueError(f'{y_pred.ndim} dimensional data has been passed for vtk output. Only 5D (area/time) and 6D (volumentric/time) data should be considered.')
         
@@ -720,8 +721,19 @@ def seq2npy(y_pred, path, start_snap=0):
     '''
     if y_pred.ndim == 6 or y_pred.ndim == 5:
         for kk in range(y_pred.shape[1]):
-            np.save(f'{path}/snap_{kk+start_snap}.npy', y_pred.numpy()[0,kk,0,...]) # here ellipses does the trick
+            for jj in range(y_pred.shape[2]):
+                np.save(f'{path}/component_{jj}_snap_{kk+start_snap}.npy', y_pred.numpy()[0,kk,jj,...]) # here ellipses does the trick
     else:
         raise ValueError(f'{y_pred.ndim} dimensional data has been passed for npy output. Only 5D (area/time) and 6D (volumentric/time) data should be considered.')
     
-    
+
+
+def gradsquared(
+    x : torch.Tensor,
+    ) -> torch.Tensor:
+    '''
+    This function evaluates the squared gradient of the provided tensor; currently implemented for 2D only; gradient is evaluated using a (central) finite difference scheme.
+    '''
+    gradx = 0.5*(torch.roll(x, 1, dims=-2) - torch.roll(x, -1, dims=-2))
+    grady = 0.5*(torch.roll(x, 1, dims=-1) - torch.roll(x, -1, dims=-1))
+    return gradx**2 + grady**2

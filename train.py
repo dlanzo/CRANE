@@ -60,10 +60,10 @@ def train(model, loss_fn, optimizer, loaders, args):
                 params = None
             
             # breaking if in debug mode
-            if j >= 1 and args.debug:
+            if j >= 30 and args.debug:
                 print('Breaking because of DEBUG mode.')
                 break
-            
+
             # first epoch in reloading has a ramping lr (this way Adam can re-recongnize slow and fast modes in loss function landscape)
             if epoch == 0 and args.reload: 
                 for g in optimizer.param_groups:
@@ -115,11 +115,14 @@ def train(model, loss_fn, optimizer, loaders, args):
             else:
                 y_pred = model(input_data, noise_reg=args.noise_reg, approx_inference=False)
                 
-            
             loss = loss_fn(y_pred, target_data)
             loss.backward()
             
             if j%args.superbatch == 0 or j==len_train_loader-1:
+                print('Optimization step')
+                with torch.no_grad():
+                    print('P values --->', [p.detach().cpu().item() for p in model.P])
+                    print('Predicted range --->', y_pred[:,-1,0,...].detach().max().item(), y_pred[:,-1,0,...].detach().min().item())
                 optimizer.step()
                 optimizer.zero_grad()
             
@@ -211,8 +214,8 @@ def train(model, loss_fn, optimizer, loaders, args):
             y_pred_cpu = y_pred.detach().cpu()
             target_data_cpu = target_data.detach().cpu()
             
-            im_last_pred    = y_pred_cpu[0,-1,:,:,:].permute(1,2,0)
-            im_last_target  = target_data_cpu[0,-1,:,:,:].permute(1,2,0)
+            im_last_pred    = y_pred_cpu[0,-1,0,:,:].unsqueeze(0).permute(1,2,0)
+            im_last_target  = target_data_cpu[0,-1,0,:,:].unsqueeze(0).permute(1,2,0)
             
             out_png(
                 im_pred     = im_last_pred,
@@ -225,12 +228,12 @@ def train(model, loss_fn, optimizer, loaders, args):
             
             if args.gifs:
                 out_gifs(
-                    y_pred      = y_pred_cpu,
+                    y_pred      = y_pred_cpu[:,:,0,:,:].unsqueeze(2),
                     path        = f'{args.paths["gif"]}/epoch_{epoch}.gif'
                     )
                 
                 out_gifs(
-                    y_pred      = target_data_cpu,
+                    y_pred      = target_data_cpu[:,:,0,:,:].unsqueeze(2),
                     path        = f'{args.paths["gif"]}/epoch_{epoch}_TRUE.gif'
                     )
                 
@@ -378,7 +381,7 @@ def main():
     # Define model and put to device
     model = model_class(
         hidden_units        = args.hidden,
-        input_channels      = 1, # this is hardcoded for the moment... waiting for multidimensional data!
+        input_channels      = 3,
         output_channels     = None if not args.extract_param else args.num_params,
         hidden_channels     = args.channels,
         kernel_size         = args.kernel_size,
@@ -387,6 +390,8 @@ def main():
         bias                = args.bias,
         divergence          = args.divergence,
         num_params          = args.num_params if not args.extract_param else 0,
+        pooling             = args.pooling,
+        zero_mean           = args.zero_mean,
         dropout             = args.dropout,
         dropout_prob        = args.dropout_prob
         )
@@ -411,7 +416,7 @@ def main():
     save_args(args)
     
     # define optimizer
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.RMSprop(
         model.parameters(),
         lr              = args.lr,
         weight_decay    = args.weightd
@@ -419,19 +424,27 @@ def main():
     
     # define loss function
     if args.extract_param:
-        loss_fn = nn.MSELoss()
+        loss_fn = lambda x: nn.MSELoss()(x)/args.superbatch
     elif not args.threeD:
         loss_fn = lambda x,y: \
-            nn.MSELoss()(x,y) + args.massW*nn.MSELoss()(
+            (nn.MSELoss()(x,y) + \
+            args.massW*nn.MSELoss()(
                 torch.mean( x, axis=(-1,-2) ),
                 torch.mean( y, axis=(-1,-2) )
-                )
+                ) + \
+            args.gradloss_weight*nn.MSELoss()(
+                gradsquared(x),gradsquared(y)
+                ))/args.superbatch
     else:
         loss_fn = lambda x,y: \
-            nn.MSELoss()(x,y) + args.massW*nn.MSELoss()(
+            (nn.MSELoss()(x,y) + \
+            args.massW*nn.MSELoss()(
                 torch.mean( x, axis=(-1,-2,-3) ),
                 torch.mean( y, axis=(-1,-2,-3) )
-                )
+                ) + \
+            args.gradloss_weight*nn.MSELoss()(
+                gradsquared(x) -  gradsquared(y)
+                ))/args.superbatch
     
     # training loop
     train(model, loss_fn, optimizer, (train_loader, valid_loader), args)
