@@ -437,13 +437,15 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
-                    output = self.sigmoid(output)
+                    output = input_t_old + output#self.sigmoid(output)
             else:
                 output = hidden_list[-1]
                 
             outputs += [output]
             
         for _ in range(future):
+
+            output_old = output
             
             if noise_reg != 0:
                 output = output + noise_reg*torch.randn(output.shape, device=output.device)
@@ -462,7 +464,7 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
-                    output = self.sigmoid(output)
+                    output = output_old + output #self.sigmoid(output)
             else:
                 output = hidden_list[-1]
             outputs += [output]
