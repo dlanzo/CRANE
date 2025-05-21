@@ -250,7 +250,24 @@ class ConvGRU(nn.Module):
     This class defines a module stacking multiple ConvGRU together. The module also provides an additional output layer producing a B&W image using a sigmoid activation function
     '''
     
-    def __init__(self, hidden_units, input_channels, output_channels, hidden_channels, kernel_size, padding_mode, separable=False, reduce_out=True, squash_out=True, bias=True, divergence=True, num_params=0,  dropout=False, dropout_prob=None):
+    def __init__(
+        self,
+        hidden_units        : int,
+        input_channels      : int,
+        output_channels     : int,
+        hidden_channels     : int,
+        kernel_size         : int,
+        padding_mode        : str,
+        separable           : bool          = False,
+        reduce_out          : bool          = True,
+        squash_out          : bool          = True,
+        bias                : bool          = True,
+        divergence          : bool          = True,
+        conservative        : bool          = True,
+        num_params          : int           = 0,
+        dropout             : bool          = False,
+        dropout_prob        : bool | None   = None
+        ):
         '''
         init function
         '''
@@ -280,6 +297,7 @@ class ConvGRU(nn.Module):
         self.bias       = bias
         
         self.div_mode   = divergence
+        self.conservative = conservative
         
         self.toOut      = nn.Sequential(
             nn.Conv2d(
@@ -419,8 +437,10 @@ class ConvGRU(nn.Module):
             input_t_old = input_t
             
             if noise_reg != 0:
-                input_t = input_t + noise_reg*torch.randn(input_t.shape, device=input_t.device)
-            
+                noise = noise_reg*torch.randn(input_t.shape, device=input_t.device)
+                if self.conservative: noise = noise - torch.mean(noise, dim=(-1,-2), keepdim=True) # remove mean noise value
+                input_t = input_t + noise
+
             input_t = self.cat_params(input_t, params)
             
             for kk in range(self.hidden_units):
@@ -437,7 +457,8 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
-                    output = input_t_old + output#self.sigmoid(output)
+                    if self.conservative: output = output - torch.mean(output, dim=(-1,-2), keepdim=True)
+                    output = input_t_old.squeeze(1)+ output#self.sigmoid(output)
             else:
                 output = hidden_list[-1]
                 
@@ -448,8 +469,9 @@ class ConvGRU(nn.Module):
             output_old = output
             
             if noise_reg != 0:
-                output = output + noise_reg*torch.randn(output.shape, device=output.device)
-            
+                noise =  noise_reg*torch.randn(output.shape, device=output.device)
+                if self.conservative: noise = noise - torch.mean(noise, dim=(-1,-2), keepdim=True)
+                output = output + noise
             
             for kk in range(self.hidden_units):
                 
@@ -464,6 +486,7 @@ class ConvGRU(nn.Module):
             if self.reduce_out:
                 output = self.toOut(hidden_list[-1])
                 if self.squash_out:
+                    if self.conservative: output = output - torch.mean(output, dim=(-1,-2), keepdim=True)
                     output = output_old + output #self.sigmoid(output)
             else:
                 output = hidden_list[-1]

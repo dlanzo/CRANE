@@ -386,6 +386,7 @@ def main():
         separable           = False,
         bias                = args.bias,
         divergence          = args.divergence,
+        conservative        = args.conservative,
         num_params          = args.num_params if not args.extract_param else 0,
         dropout             = args.dropout,
         dropout_prob        = args.dropout_prob

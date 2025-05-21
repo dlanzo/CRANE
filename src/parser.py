@@ -134,6 +134,12 @@ class GeneralParser():
             action      = 'store_true',
             help        = 'Models are in divergence mode (the evolution follows a continuity law)'
             )
+
+        self.parser.add_argument(
+            '--conservative',
+            action      = 'store_true',
+            help        = 'Toggles conservative mode for non-divergence training (it is ignored if divergence==True)'
+            )
         
         self.parser.add_argument(
             '--num_params',
