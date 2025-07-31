@@ -46,4 +46,6 @@ The scope of folders is as follows:
 - _`train_logs`_ contains the output of training procedures (i.e. training statistics, model checkpoints, prediction snapshots at different training stages...)
 
 # Papers
-The CRANE code has been used for the paper: [_Extreme time extrapolation capabilities and thermodynamic consistency of physics-inspired NeuralNetworks for the 3D microstructure evolution of materials via Cahn-Hilliard flow_](https://doi.org/10.1088/2632-2153/ad8532). If you need the dataset for reproducing this study don't hesitate to contact us.
+The CRANE code has been used for the following papers:
+* [_Extreme time extrapolation capabilities and thermodynamic consistency of physics-inspired NeuralNetworks for the 3D microstructure evolution of materials via Cahn-Hilliard flow_](https://doi.org/10.1088/2632-2153/ad8532). If you need the dataset for reproducing this study don't hesitate to contact us.
+* [_Unified machine-learning framework for property prediction and time-evolution simulation of strained alloy microstructure_](https://doi.org/10.48550/arXiv.2507.21760). The dataset is available [here](https://doi.org/10.24435/materialscloud:y7-nj).
