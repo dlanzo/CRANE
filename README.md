@@ -47,5 +47,6 @@ The scope of folders is as follows:
 
 # Papers
 The CRANE code has been used for the following papers:
-* [_Extreme time extrapolation capabilities and thermodynamic consistency of physics-inspired NeuralNetworks for the 3D microstructure evolution of materials via Cahn-Hilliard flow_](https://doi.org/10.1088/2632-2153/ad8532). If you need the dataset for reproducing this study don't hesitate to contact us.
+* [_Extreme time extrapolation capabilities and thermodynamic consistency of physics-inspired NeuralNetworks for the 3D microstructure evolution of materials via Cahn-Hilliard flow_](https://doi.org/10.1088/2632-2153/ad8532). If you need the dataset for reproducing this study, don't hesitate to contact us.
 * [_Unified machine-learning framework for property prediction and time-evolution simulation of strained alloy microstructure_](https://doi.org/10.48550/arXiv.2507.21760). The dataset is available [here](https://doi.org/10.24435/materialscloud:y7-nj).
+* [_A parametrically-Conditioned Deep Learning Surrogate for Coherent Spinodal Decomposition_](https://doi.org/10.1002/adts.202502144). The dataset is available [here](https://doi.org/10.24435/materialscloud:y7-nj).
